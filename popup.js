@@ -2,6 +2,42 @@
 import { supabase } from "./supabase.js";
 import { api } from "./api.js";
 
+/**
+ * Sanitize HTML to prevent XSS attacks.
+ * This escapes HTML entities to prevent script injection.
+ */
+function escapeHtml(text) {
+	const div = document.createElement("div");
+	div.textContent = text;
+	return div.innerHTML;
+}
+
+/**
+ * Format markdown to safe HTML (XSS protected).
+ * Only allows safe formatting without executing scripts.
+ */
+function formatMarkdownSafe(text) {
+	// First escape all HTML entities to prevent XSS
+	let safeText = escapeHtml(text);
+
+	return (
+		safeText
+			// Bold (already escaped, so we need to handle **text**)
+			.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+			// Italic
+			.replace(/\*(.+?)\*/g, "<em>$1</em>")
+			// Code (backticks are safe after escaping)
+			.replace(/`(.+?)`/g, "<code>$1</code>")
+			// Links - only allow http/https protocols
+			.replace(
+				/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+				'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+			)
+			// Line breaks
+			.replace(/\n/g, "<br>")
+	);
+}
+
 // DOM Elements
 const loginView = document.getElementById("login-view");
 const chatView = document.getElementById("chat-view");
@@ -133,7 +169,7 @@ async function saveCurrentPage() {
 		// Create memory via API
 		const memory = await api.createMemory(
 			pageContent.title || "Saved Page",
-			formatMemoryContent(pageContent)
+			formatMemoryContent(pageContent),
 		);
 
 		// Show success
@@ -149,7 +185,7 @@ async function saveCurrentPage() {
 		// Add success message to chat
 		addMessage(
 			"assistant",
-			`✅ Saved "${pageContent.title}" to your memories! You can now ask me questions about it.`
+			`✅ Saved "${pageContent.title}" to your memories! You can now ask me questions about it.`,
 		);
 
 		// Reset button after delay
@@ -473,7 +509,7 @@ async function streamChat(query) {
 						hideStatus();
 					}
 					fullResponse += event.payload;
-					contentDiv.innerHTML = formatMarkdown(fullResponse);
+					contentDiv.innerHTML = formatMarkdownSafe(fullResponse);
 					scrollToBottom();
 					break;
 
@@ -487,20 +523,20 @@ async function streamChat(query) {
 
 					if (citations.length > 0) {
 						contentDiv.innerHTML =
-							formatMarkdown(fullResponse) + formatCitations(citations);
+							formatMarkdownSafe(fullResponse) + formatCitations(citations);
 					}
 					break;
 
 				case "error":
-					contentDiv.innerHTML = `❌ ${
-						event.payload.message || "An error occurred"
-					}`;
+					contentDiv.innerHTML = `❌ ${escapeHtml(
+						event.payload.message || "An error occurred",
+					)}`;
 					break;
 			}
 		}
 	} catch (error) {
 		console.error("Chat error:", error);
-		contentDiv.innerHTML = `❌ ${error.message}`;
+		contentDiv.innerHTML = `❌ ${escapeHtml(error.message)}`;
 	} finally {
 		isStreaming = false;
 		sendBtn.disabled = false;
@@ -514,39 +550,28 @@ async function streamChat(query) {
 function addMessage(role, content) {
 	const messageDiv = document.createElement("div");
 	messageDiv.className = `message ${role}`;
-	messageDiv.innerHTML = `<div class="message-content">${formatMarkdown(
-		content
+	messageDiv.innerHTML = `<div class="message-content">${formatMarkdownSafe(
+		content,
 	)}</div>`;
 	messagesContainer.appendChild(messageDiv);
 	scrollToBottom();
 }
 
-// Format markdown (basic)
+// Format markdown (basic) - DEPRECATED: Use formatMarkdownSafe instead
+// Kept for reference only
 function formatMarkdown(text) {
-	return (
-		text
-			// Bold
-			.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-			// Italic
-			.replace(/\*(.*?)\*/g, "<em>$1</em>")
-			// Code
-			.replace(/`(.*?)`/g, "<code>$1</code>")
-			// Links
-			.replace(
-				/\[([^\]]+)\]\(([^)]+)\)/g,
-				'<a href="$2" target="_blank">$1</a>'
-			)
-			// Line breaks
-			.replace(/\n/g, "<br>")
-	);
+	console.warn("formatMarkdown is deprecated, use formatMarkdownSafe instead");
+	return formatMarkdownSafe(text);
 }
 
-// Format citations
+// Format citations (XSS protected)
 function formatCitations(citations) {
 	if (!citations || citations.length === 0) return "";
 
 	const citationItems = citations
-		.map((c) => `<span class="citation">${c.title || "Memory"}</span>`)
+		.map(
+			(c) => `<span class="citation">${escapeHtml(c.title || "Memory")}</span>`,
+		)
 		.join("");
 
 	return `<div class="citations"><strong>Sources:</strong> ${citationItems}</div>`;
